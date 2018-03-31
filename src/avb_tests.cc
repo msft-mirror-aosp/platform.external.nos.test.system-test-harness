@@ -1,6 +1,7 @@
 #include <memory>
 
 #include "gtest/gtest.h"
+#include "avb_tools.h"
 #include "nugget_tools.h"
 #include "nugget/app/avb/avb.pb.h"
 #include "Avb.client.h"
@@ -18,13 +19,9 @@ using std::string;
 using std::unique_ptr;
 
 using namespace nugget::app::avb;
+using namespace avb_tools;
 
 namespace {
-
-struct ResetMessage {
-  uint64_t nonce;
-  uint8_t data[32];
-};
 
 class AvbTest: public testing::Test {
  protected:
@@ -37,14 +34,10 @@ class AvbTest: public testing::Test {
 
   void SetBootloader(void);
   void BootloaderDone(void);
-  void ResetProduction(void);
 
-  void GetState(bool *bootloader, bool *production, uint8_t *locks);
-  int Reset(ResetRequest_ResetKind kind, const uint8_t *sig, size_t size);
-  int GetResetChallenge(uint32_t *selector, uint64_t *nonce, uint8_t *device_data, size_t *len);
   int ProductionResetTest(uint32_t selector, uint64_t nonce,
-                          uint8_t *device_data, size_t data_len,
-                          uint8_t *signature, size_t signature_len);
+                          const uint8_t *device_data, size_t data_len,
+                          const uint8_t *signature, size_t signature_len);
   int SignChallenge(const struct ResetMessage *message,
                     uint8_t *signature, size_t *siglen);
 
@@ -55,7 +48,6 @@ class AvbTest: public testing::Test {
   int SetOwnerLock(uint8_t locked, const uint8_t *metadata, size_t size);
   int GetOwnerKey(uint32_t offset, uint8_t *metadata, size_t *size);
   int SetCarrierLock(uint8_t locked, const uint8_t *metadata, size_t size);
-  int SetProduction(bool production, const uint8_t *data, size_t size);
 
  public:
   const uint64_t LAST_NONCE = 0x4141414141414140ULL;
@@ -129,12 +121,12 @@ void AvbTest::SetUp(void)
   // TEST_IMAGE=1.
   // Note: the reset tests are not safe on -UTEST_IMAGE unless
   //       the storage can be reflashed.
-  ResetProduction();
+  ResetProduction(client.get());
 
-  code = Reset(ResetRequest::LOCKS, NULL, 0);
+  code = Reset(client.get(), ResetRequest::LOCKS, NULL, 0);
   ASSERT_NO_ERROR(code);
 
-  GetState(&bootloader, &production, locks);
+  GetState(client.get(), &bootloader, &production, locks);
   EXPECT_EQ(bootloader, false);
   EXPECT_EQ(production, false);
   EXPECT_EQ(locks[BOOT], 0x00);
@@ -163,46 +155,6 @@ void AvbTest::BootloaderDone(void)
 
   Avb service(*client);
   ASSERT_NO_ERROR(service.BootloaderDone(request, nullptr));
-}
-
-void AvbTest::GetState(bool *bootloader, bool *production, uint8_t *locks)
-{
-  GetStateRequest request;
-  GetStateResponse response;
-
-  Avb service(*client);
-  ASSERT_NO_ERROR(service.GetState(request, &response));
-  EXPECT_EQ(response.number_of_locks(), 4);
-
-  if (bootloader != NULL)
-    *bootloader = response.bootloader();
-  if (production != NULL)
-    *production = response.production();
-
-  auto response_locks = response.locks();
-  if (locks != NULL) {
-    for (size_t i = 0; i < response_locks.size(); i++)
-      locks[i] = response_locks[i];
-  }
-}
-
-int AvbTest::Reset(ResetRequest_ResetKind kind, const uint8_t *sig,
-                   size_t size)
-{
-  ResetRequest request;
-
-  request.set_kind(kind);
-  request.mutable_token()->set_selector(ResetToken::CURRENT);
-  if (sig && size) {
-    request.mutable_token()->set_signature(sig, size);
-  } else {
-    uint8_t empty[256];
-    memset(empty, 0, sizeof(empty));
-    request.mutable_token()->set_signature(empty, sizeof(empty));
-  }
-
-  Avb service(*client);
-  return service.Reset(request, nullptr);
 }
 
 static const uint8_t kResetKeyPem[] =
@@ -243,8 +195,8 @@ static RSA *GetResetKey()
 }
 
 int AvbTest::ProductionResetTest(uint32_t selector, uint64_t nonce,
-                                 uint8_t *device_data, size_t data_len,
-                                 uint8_t *signature, size_t signature_len)
+                                 const uint8_t *device_data, size_t data_len,
+                                 const uint8_t *signature, size_t signature_len)
 {
   ProductionResetTestRequest request;
   request.set_selector(selector);
@@ -298,27 +250,6 @@ int AvbTest::SignChallenge(const struct ResetMessage *message,
   RSA_free(key);
   // Feed it in
   return 0;
-}
-
-int AvbTest::GetResetChallenge(uint32_t *selector, uint64_t *nonce,
-                               uint8_t *device_data, size_t *len)
-{
-  GetResetChallengeRequest request;
-  GetResetChallengeResponse response;
-
-  Avb service(*client);
-  uint32_t ret = service.GetResetChallenge(request, &response);
-  if (ret != APP_SUCCESS) {
-    return ret;
-  }
-  *selector = response.selector();
-  *nonce = response.nonce();
-  // Only copy what there is space for.
-  *len = (*len < response.device_data().size() ? *len : response.device_data().size());
-  memcpy(device_data, response.device_data().data(), *len);
-  // Let the caller assert if the requested size was too large.
-  *len = response.device_data().size();
-  return ret;
 }
 
 int AvbTest::Load(uint8_t slot, uint64_t *version)
@@ -423,48 +354,6 @@ int AvbTest::SetCarrierLock(uint8_t locked, const uint8_t *metadata, size_t size
   return service.CarrierLock(request, nullptr);
 }
 
-int AvbTest::SetProduction(bool production, const uint8_t *data, size_t size)
-{
-  SetProductionRequest request;
-
-  request.set_production(production);
-  if (size != 0 && data != NULL) {
-    request.set_device_data(data, size);
-  }
-  // Substitute an empty hash
-  uint8_t empty[256/8];
-  memset(empty, 0, sizeof(empty));
-  if (production && data == NULL) {
-    request.set_device_data(empty, sizeof(empty));
-  }
-
-  Avb service(*client);
-  return service.SetProduction(request, nullptr);
-}
-
-void AvbTest::ResetProduction(void)
-{
-  struct ResetMessage message;
-  int code;
-  uint32_t selector;
-  size_t len = sizeof(message.data);
-  uint8_t signature[256];
-  size_t siglen = sizeof(signature);
-
-  // We need the nonce to be set before we get fallthrough.
-  memset(message.data, 0, sizeof(message.data));
-  code = GetResetChallenge(&selector, &message.nonce, message.data, &len);
-  ASSERT_NO_ERROR(code);
-  // No signature is needed for TEST_IMAGE.
-  //EXPECT_EQ(0, SignChallenge(&message, signature, &siglen));
-  Reset(ResetRequest::PRODUCTION, signature, siglen);
-  bool bootloader;
-  bool production;
-  uint8_t locks[4];
-  GetState(&bootloader, &production, locks);
-  ASSERT_EQ(production, false);
-}
-
 // Tests
 
 TEST_F(AvbTest, CarrierLockTest)
@@ -479,7 +368,7 @@ TEST_F(AvbTest, CarrierLockTest)
   code = SetCarrierLock(0x12, carrier_data, sizeof(carrier_data));
   ASSERT_NO_ERROR(code);
 
-  GetState(NULL, NULL, locks);
+  GetState(client.get(), NULL, NULL, locks);
   ASSERT_EQ(locks[CARRIER], 0x12);
 
   code = SetCarrierLock(0, NULL, 0);
@@ -487,7 +376,7 @@ TEST_F(AvbTest, CarrierLockTest)
 
   // Set production mode
   SetBootloader();
-  code = SetProduction(true, NULL, 0);
+  code = SetProduction(client.get(), true, NULL, 0);
   ASSERT_NO_ERROR(code);
   BootloaderDone();
 
@@ -495,7 +384,7 @@ TEST_F(AvbTest, CarrierLockTest)
   code = SetCarrierLock(0x12, carrier_data, sizeof(carrier_data));
   ASSERT_EQ(code, APP_ERROR_AVB_AUTHORIZATION);
 
-  GetState(NULL, NULL, locks);
+  GetState(client.get(), NULL, NULL, locks);
   ASSERT_EQ(locks[CARRIER], 0x00);
 
   code = SetCarrierLock(0, NULL, 0);
@@ -536,19 +425,19 @@ TEST_F(AvbTest, DeviceLockTest)
 
   // Test cannot set the lock
   SetBootloader();
-  code = SetProduction(true, NULL, 0);
+  code = SetProduction(client.get(), true, NULL, 0);
   ASSERT_NO_ERROR(code);
 
   code = SetDeviceLock(0x12);
   ASSERT_EQ(code, APP_ERROR_AVB_HLOS);
 
   // Test can set lock
-  ResetProduction();
+  ResetProduction(client.get());
 
   code = SetDeviceLock(0x34);
   ASSERT_NO_ERROR(code);
 
-  GetState(&bootloader, &production, locks);
+  GetState(client.get(), &bootloader, &production, locks);
   ASSERT_TRUE(bootloader);
   ASSERT_FALSE(production);
   ASSERT_EQ(locks[DEVICE], 0x34);
@@ -557,14 +446,14 @@ TEST_F(AvbTest, DeviceLockTest)
   code = SetDeviceLock(0x56);
   ASSERT_EQ(code, APP_ERROR_AVB_DENIED);
 
-  GetState(NULL, NULL, locks);
+  GetState(client.get(), NULL, NULL, locks);
   ASSERT_EQ(locks[DEVICE], 0x34);
 
   // Test can unset
   code = SetDeviceLock(0x00);
   ASSERT_NO_ERROR(code);
 
-  GetState(NULL, NULL, locks);
+  GetState(client.get(), NULL, NULL, locks);
   ASSERT_EQ(locks[DEVICE], 0x00);
 }
 
@@ -572,59 +461,86 @@ TEST_F(AvbTest, BootLockTest)
 {
   uint8_t locks[4];
   int code;
+  // Test production logic.
+  code = SetProduction(client.get(), true, NULL, 0);
+  ASSERT_NO_ERROR(code);
 
   // Test cannot set lock
   code = SetBootLock(0x12);
   ASSERT_EQ(code, APP_ERROR_AVB_BOOTLOADER);
 
-  GetState(NULL, NULL, locks);
+  GetState(client.get(), NULL, NULL, locks);
   ASSERT_EQ(locks[BOOT], 0x00);
 
-  // Test cannot set lock while carrier set
+  // Show the bootloader setting and unsetting.
   SetBootloader();
+  code = SetBootLock(0x12);
+  ASSERT_NO_ERROR(code);
+
+  GetState(client.get(), NULL, NULL, locks);
+  ASSERT_EQ(locks[BOOT], 0x12);
+
+  code = SetBootLock(0x0);
+  ASSERT_NO_ERROR(code);
+
+  GetState(client.get(), NULL, NULL, locks);
+  ASSERT_EQ(locks[BOOT], 0x00);
+
+  // Test cannot unset lock while carrier set
+  ResetProduction(client.get());
+  code = Reset(client.get(), ResetRequest::LOCKS, NULL, 0);
+  ASSERT_NO_ERROR(code);
+
   code = SetCarrierLock(0x34, DEVICE_DATA, sizeof(DEVICE_DATA));
   ASSERT_NO_ERROR(code);
 
+  code = SetProduction(client.get(), true, NULL, 0);
+  ASSERT_NO_ERROR(code);
+
+  // Can lock when carrier lock is set.
   code = SetBootLock(0x56);
+  ASSERT_NO_ERROR(code);
+
+  // Cannot unlock.
+  code = SetBootLock(0x0);
   ASSERT_EQ(code, APP_ERROR_AVB_DENIED);
 
-  GetState(NULL, NULL, locks);
-  ASSERT_EQ(locks[CARRIER], 0x34);
-  ASSERT_EQ(locks[BOOT], 0x00);
+  // Or change the value.
+  code = SetBootLock(0x42);
+  ASSERT_EQ(code, APP_ERROR_AVB_DENIED);
 
-  // Test cannot set lock while device also set
+  GetState(client.get(), NULL, NULL, locks);
+  ASSERT_EQ(locks[CARRIER], 0x34);
+  ASSERT_EQ(locks[BOOT], 0x56);
+
+  // Clear the locks to show device lock enforcement.
+  ResetProduction(client.get());
+  code = Reset(client.get(), ResetRequest::LOCKS, NULL, 0);
+  ASSERT_NO_ERROR(code);
+  code = SetProduction(client.get(), true, NULL, 0);
+  ASSERT_NO_ERROR(code);
+
+  // Need to be in the HLOS.
+  code = SetDeviceLock(0x78);
+  ASSERT_EQ(code, APP_ERROR_AVB_HLOS);
+
+  BootloaderDone();
   code = SetDeviceLock(0x78);
   ASSERT_NO_ERROR(code);
 
+  // We can move to a locked state when
+  // device lock is true.
+  SetBootloader();
   code = SetBootLock(0x9A);
+  ASSERT_NO_ERROR(code);
+
+  // But we can't move back.
+  code = SetBootLock(0x0);
   ASSERT_EQ(code, APP_ERROR_AVB_DENIED);
 
-  GetState(NULL, NULL, locks);
+  GetState(client.get(), NULL, NULL, locks);
   ASSERT_EQ(locks[DEVICE], 0x78);
-  ASSERT_EQ(locks[BOOT], 0x00);
-
-  // Test cannot set lock while device set
-  code = SetCarrierLock(0x00, NULL, 0);
-  ASSERT_NO_ERROR(code);
-
-  code = SetBootLock(0xBC);
-  ASSERT_EQ(code, APP_ERROR_AVB_DENIED);
-
-  GetState(NULL, NULL, locks);
-  ASSERT_EQ(locks[CARRIER], 0x00);
-  ASSERT_EQ(locks[DEVICE], 0x78);
-  ASSERT_EQ(locks[BOOT], 0x00);
-
-  // Test can set lock
-  code = SetDeviceLock(0x00);
-  ASSERT_NO_ERROR(code);
-
-  code = SetBootLock(0xDE);
-  ASSERT_NO_ERROR(code);
-
-  GetState(NULL, NULL, locks);
-  ASSERT_EQ(locks[DEVICE], 0x00);
-  ASSERT_EQ(locks[BOOT], 0xDE);
+  ASSERT_EQ(locks[BOOT], 0x9A);
 }
 
 TEST_F(AvbTest, OwnerLockTest)
@@ -649,14 +565,14 @@ TEST_F(AvbTest, OwnerLockTest)
   code = SetBootLock(0x43);
   ASSERT_NO_ERROR(code);
 
-  GetState(NULL, NULL, locks);
+  GetState(client.get(), NULL, NULL, locks);
   ASSERT_EQ(locks[BOOT], 0x43);
 
   // Try the owner lock again
   code = SetOwnerLock(0x65, owner_key, sizeof(owner_key));
   ASSERT_NO_ERROR(code);
 
-  GetState(NULL, NULL, locks);
+  GetState(client.get(), NULL, NULL, locks);
   ASSERT_EQ(locks[OWNER], 0x65);
 
   for (i = 0; i < AVB_METADATA_MAX_SIZE; i += AVB_CHUNK_MAX_SIZE) {
@@ -675,14 +591,14 @@ TEST_F(AvbTest, OwnerLockTest)
   code = SetOwnerLock(0x87, owner_key, sizeof(owner_key));
   ASSERT_EQ(code, APP_ERROR_AVB_DENIED);
 
-  GetState(NULL, NULL, locks);
+  GetState(client.get(), NULL, NULL, locks);
   ASSERT_EQ(locks[OWNER], 0x65);
 
   // Clear it
   code = SetOwnerLock(0x00, owner_key, sizeof(owner_key));
   ASSERT_NO_ERROR(code);
 
-  GetState(NULL, NULL, locks);
+  GetState(client.get(), NULL, NULL, locks);
   ASSERT_EQ(locks[OWNER], 0x00);
 }
 
@@ -693,7 +609,7 @@ TEST_F(AvbTest, ProductionMode)
   int code;
 
   // Check we're not in production mode
-  GetState(NULL, &production, NULL);
+  GetState(client.get(), NULL, &production, NULL);
   ASSERT_FALSE(production);
 
   // Set some lock values to make sure production doesn't affect them
@@ -711,10 +627,10 @@ TEST_F(AvbTest, ProductionMode)
   ASSERT_NO_ERROR(code);
 
   // Set production mode with a DUT hash
-  code = SetProduction(true, NULL, 0);
+  code = SetProduction(client.get(), true, NULL, 0);
   ASSERT_NO_ERROR(code);
 
-  GetState(NULL, &production, locks);
+  GetState(client.get(), NULL, &production, locks);
   ASSERT_TRUE(production);
   ASSERT_EQ(locks[BOOT], 0x11);
   ASSERT_EQ(locks[OWNER], 0x22);
@@ -722,10 +638,10 @@ TEST_F(AvbTest, ProductionMode)
   ASSERT_EQ(locks[DEVICE], 0x44);
 
   // Test production cannot be turned off.
-  code = SetProduction(false, NULL, 0);
+  code = SetProduction(client.get(), false, NULL, 0);
   ASSERT_EQ(code, APP_ERROR_AVB_AUTHORIZATION);
   BootloaderDone();
-  code = SetProduction(false, NULL, 0);
+  code = SetProduction(client.get(), false, NULL, 0);
   ASSERT_EQ(code, APP_ERROR_AVB_AUTHORIZATION);
 }
 
@@ -735,7 +651,7 @@ TEST_F(AvbTest, Rollback)
   int code, i;
 
   // Test we cannot change values in normal mode
-  code = SetProduction(true, NULL, 0);
+  code = SetProduction(client.get(), true, NULL, 0);
   ASSERT_NO_ERROR(code);
   for (i = 0; i < 8; i++) {
     code = Store(i, 0xFF00000011223344 + i);
@@ -743,7 +659,7 @@ TEST_F(AvbTest, Rollback)
 
     code = Load(i, &value);
     ASSERT_NO_ERROR(code);
-    ASSERT_EQ(value, 0x00);
+    ASSERT_EQ(value, 0x00ULL);
   }
 
   // Test we can change values in bootloader mode
@@ -780,33 +696,33 @@ TEST_F(AvbTest, Reset)
   code = SetDeviceLock(0x34);
   ASSERT_NO_ERROR(code);
 
-  code = SetProduction(true, NULL, 0);
+  code = SetProduction(client.get(), true, NULL, 0);
   ASSERT_NO_ERROR(code);
 
   BootloaderDone();
 
-  GetState(&bootloader, &production, locks);
+  GetState(client.get(), &bootloader, &production, locks);
   ASSERT_FALSE(bootloader);
   ASSERT_TRUE(production);
   ASSERT_EQ(locks[BOOT], 0x12);
   ASSERT_EQ(locks[DEVICE], 0x34);
 
   // Try reset, should fail
-  code = Reset(ResetRequest::LOCKS, NULL, 0);
+  code = Reset(client.get(), ResetRequest::LOCKS, NULL, 0);
   ASSERT_EQ(code, APP_ERROR_AVB_DENIED);
 
-  GetState(&bootloader, &production, locks);
+  GetState(client.get(), &bootloader, &production, locks);
   ASSERT_FALSE(bootloader);
   ASSERT_TRUE(production);
   ASSERT_EQ(locks[BOOT], 0x12);
   ASSERT_EQ(locks[DEVICE], 0x34);
 
   // Disable production, try reset, should pass
-  ResetProduction();
-  code = Reset(ResetRequest::LOCKS, NULL, 0);
+  ResetProduction(client.get());
+  code = Reset(client.get(), ResetRequest::LOCKS, NULL, 0);
   ASSERT_NO_ERROR(code);
 
-  GetState(&bootloader, &production, locks);
+  GetState(client.get(), &bootloader, &production, locks);
   ASSERT_FALSE(bootloader);
   ASSERT_FALSE(production);
   ASSERT_EQ(locks[BOOT], 0x00);
@@ -824,18 +740,96 @@ TEST_F(AvbTest, GetResetChallengeTest)
 
   memset(data, 0, sizeof(data));
   memset(empty, 0, sizeof(empty));
-  code = GetResetChallenge(&selector, &nonce, data, &len);
+  code = GetResetChallenge(client.get(), &selector, &nonce, data, &len);
   ASSERT_LE(sizeof(data), len);
   ASSERT_NO_ERROR(code);
-  EXPECT_NE(0, nonce);
-  EXPECT_EQ(ResetToken::CURRENT, selector);
-  EXPECT_EQ(32, len);
+  EXPECT_NE(0ULL, nonce);
+  EXPECT_EQ((uint32_t)ResetToken::CURRENT, selector);
+  EXPECT_EQ(32UL, len);
   // We didn't set a device id.
   EXPECT_EQ(0, memcmp(data, empty, sizeof(empty)));
 }
 
+// TODO(drewry) move to new test suite since this is unsafe on
+//  non-TEST_IMAGE builds.
+TEST_F(AvbTest, ResetProductionValid)
+{
+  static const uint8_t kDeviceHash[] = {
+    0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8,
+    0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8,
+    0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8,
+    0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8
+  };
+  struct ResetMessage message;
+  int code;
+  uint32_t selector;
+  size_t len = sizeof(message.data);
+  uint8_t signature[2048/8 + 1];
+  size_t siglen = sizeof(signature);
 
-TEST_F(AvbTest, ProductionProductionTestValid)
+  // Lock in a fixed device hash
+  code = SetProduction(client.get(), true, kDeviceHash, sizeof(kDeviceHash));
+  EXPECT_EQ(0, code);
+
+  memset(message.data, 0, sizeof(message.data));
+  code = GetResetChallenge(client.get(), &selector, &message.nonce, message.data, &len);
+  ASSERT_NO_ERROR(code);
+  // Expect, not assert, just in case something goes weird, we may still
+  // exit cleanly.
+  EXPECT_EQ(0, memcmp(message.data, kDeviceHash, sizeof(kDeviceHash)));
+  ASSERT_EQ(0, SignChallenge(&message, signature, &siglen));
+
+  // Try a bad challenge, wasting the nonce.
+  uint8_t orig = signature[0];
+  signature[0] += 1;
+  code = Reset(client.get(), ResetRequest::PRODUCTION, signature, siglen);
+  // TODO: expect the LINENO error
+  EXPECT_NE(0, code);
+  signature[0] = orig;
+  // Re-lock since TEST_IMAGE will unlock on failure.
+  code = SetProduction(client.get(), true, kDeviceHash, sizeof(kDeviceHash));
+  EXPECT_EQ(0, code);
+
+  // Now use a good one, but without getting a new nonce.
+  code = Reset(client.get(), ResetRequest::PRODUCTION, signature, siglen);
+  EXPECT_EQ(code, APP_ERROR_AVB_DENIED);
+
+  // Now get the nonce and use a good signature.
+  code = GetResetChallenge(client.get(), &selector, &message.nonce, message.data, &len);
+  ASSERT_NO_ERROR(code);
+  ASSERT_EQ(0, SignChallenge(&message, signature, &siglen));
+  code = Reset(client.get(), ResetRequest::PRODUCTION, signature, siglen);
+  ASSERT_NO_ERROR(code);
+}
+
+static const uint8_t kNullSig[] = {
+  0x95, 0x35, 0x5a, 0xb6, 0xe3, 0x8e, 0x43, 0x03, 0xd9, 0xd9, 0xd5, 0x6e,
+  0x99, 0x86, 0xff, 0x8e, 0x6a, 0xf1, 0x54, 0x6f, 0xa8, 0xff, 0x37, 0x38,
+  0xc6, 0x9b, 0x4d, 0xc6, 0x99, 0x1f, 0x37, 0x5c, 0xec, 0xf4, 0x32, 0xd8,
+  0xe6, 0x00, 0xcc, 0x74, 0xde, 0xa9, 0x68, 0x1a, 0xab, 0x6a, 0x6e, 0xe7,
+  0xa7, 0xa1, 0x59, 0xe0, 0x7c, 0x86, 0x95, 0x28, 0x94, 0x18, 0x3f, 0x0f,
+  0xb9, 0x0f, 0x05, 0x6c, 0x86, 0x5a, 0x6a, 0xe4, 0x6d, 0x36, 0x71, 0x86,
+  0x38, 0xab, 0x7a, 0x2d, 0x9c, 0xa5, 0xfa, 0xc8, 0x7c, 0x48, 0x02, 0x8c,
+  0x6b, 0x4d, 0xda, 0xa4, 0xb5, 0xa8, 0x17, 0x39, 0x5e, 0xe3, 0x1a, 0xd5,
+  0xf8, 0x87, 0x6e, 0xd9, 0xc0, 0x0c, 0x29, 0x4d, 0x93, 0xa2, 0x3b, 0xfc,
+  0x2d, 0x38, 0x8e, 0x2b, 0xc7, 0x49, 0x26, 0xd9, 0xcb, 0x47, 0x89, 0x4c,
+  0x79, 0xd3, 0x60, 0x62, 0xf9, 0x71, 0xa7, 0x73, 0x6a, 0x03, 0x65, 0x1f,
+  0x11, 0x0d, 0x9e, 0x27, 0x99, 0x6b, 0xa7, 0x46, 0x85, 0x75, 0xec, 0xff,
+  0x5b, 0x1d, 0x8d, 0x1b, 0x34, 0xd8, 0xb9, 0x4f, 0x63, 0x88, 0x08, 0xa8,
+  0x16, 0xba, 0xfc, 0xe7, 0x66, 0xa4, 0xe5, 0xde, 0x4e, 0x0b, 0x98, 0x80,
+  0xd5, 0x16, 0x55, 0xfb, 0xdb, 0xe8, 0xa2, 0x90, 0x85, 0x4e, 0xa9, 0xb6,
+  0x81, 0x55, 0xef, 0xbf, 0x12, 0xe3, 0xd2, 0xa9, 0xae, 0x2c, 0x43, 0x67,
+  0x4c, 0x09, 0x6d, 0x95, 0xaf, 0x44, 0xc2, 0xb9, 0x9d, 0x7c, 0xb1, 0x88,
+  0xf8, 0x6c, 0xa0, 0x13, 0x4c, 0xbf, 0x85, 0xa2, 0x8b, 0x9d, 0x06, 0xc8,
+  0x11, 0xdb, 0x1f, 0xfb, 0x05, 0x15, 0xd6, 0x1f, 0xe5, 0x52, 0x9c, 0xd5,
+  0xbd, 0xff, 0xb0, 0xce, 0x29, 0xec, 0xd8, 0x9e, 0xdb, 0x5b, 0xc9, 0x52,
+  0x24, 0xaf, 0x22, 0xeb, 0xce, 0x15, 0x0d, 0xfd, 0x6c, 0x76, 0x90, 0x3e,
+  0x4f, 0x63, 0xfd, 0xb1
+};
+
+const static unsigned int kNullSigLen = 256;
+
+TEST_F(AvbTest, ProductionResetTestValid)
 {
   static const uint8_t kDeviceHash[] = {
     0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8,
@@ -869,62 +863,17 @@ TEST_F(AvbTest, ProductionProductionTestValid)
 
   // Note, testing nonce expiration is handled in the Reset(PRODUCTION)
   // test. This just checks a second signature over an app sourced nonce.
-  code = GetResetChallenge(&selector, &message.nonce, message.data, &len);
+  code = GetResetChallenge(client.get(), &selector, &message.nonce, message.data, &len);
   ASSERT_NO_ERROR(code);
   ASSERT_EQ(0, SignChallenge(&message, signature, &siglen));
-  code = Reset(ResetRequest::PRODUCTION, signature, siglen);
+  code = Reset(client.get(), ResetRequest::PRODUCTION, signature, siglen);
   ASSERT_NO_ERROR(code);
-}
 
-// TODO(drewry) move to new test suite since this is unsafe on
-//  non-TEST_IMAGE builds.
-TEST_F(AvbTest, ResetProductionValid)
-{
-  static const uint8_t kDeviceHash[] = {
-    0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8,
-    0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8,
-    0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8,
-    0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8
-  };
-  struct ResetMessage message;
-  int code;
-  uint32_t selector;
-  size_t len = sizeof(message.data);
-  uint8_t signature[2048/8 + 1];
-  size_t siglen = sizeof(signature);
-
-  // Lock in a fixed device hash
-  code = SetProduction(true, kDeviceHash, sizeof(kDeviceHash));
-  EXPECT_EQ(0, code);
-
+  // Now test a null signature as we will for the real keys
+  message.nonce = 0;
   memset(message.data, 0, sizeof(message.data));
-  code = GetResetChallenge(&selector, &message.nonce, message.data, &len);
-  ASSERT_NO_ERROR(code);
-  // Expect, not assert, just in case something goes weird, we may still
-  // exit cleanly.
-  EXPECT_EQ(0, memcmp(message.data, kDeviceHash, sizeof(kDeviceHash)));
-  ASSERT_EQ(0, SignChallenge(&message, signature, &siglen));
-
-  // Try a bad challenge, wasting the nonce.
-  uint8_t orig = signature[0];
-  signature[0] += 1;
-  code = Reset(ResetRequest::PRODUCTION, signature, siglen);
-  // TODO: expect the LINENO error
-  EXPECT_NE(0, code);
-  signature[0] = orig;
-  // Re-lock since TEST_IMAGE will unlock on failure.
-  code = SetProduction(true, kDeviceHash, sizeof(kDeviceHash));
-  EXPECT_EQ(0, code);
-
-  // Now use a good one, but without getting a new nonce.
-  code = Reset(ResetRequest::PRODUCTION, signature, siglen);
-  EXPECT_EQ(code, APP_ERROR_AVB_DENIED);
-
-  // Now get the nonce and use a good signature.
-  code = GetResetChallenge(&selector, &message.nonce, message.data, &len);
-  ASSERT_NO_ERROR(code);
-  ASSERT_EQ(0, SignChallenge(&message, signature, &siglen));
-  code = Reset(ResetRequest::PRODUCTION, signature, siglen);
+  code = ProductionResetTest(selector, message.nonce, message.data, len,
+                             kNullSig, kNullSigLen);
   ASSERT_NO_ERROR(code);
 }
 

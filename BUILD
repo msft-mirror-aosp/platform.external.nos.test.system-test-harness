@@ -12,6 +12,7 @@ cc_binary(
         "src/gtest_with_gflags_main.cc",
         "src/keymaster-import-key-tests.cc",
         "src/keymaster-import-wrapped-key-tests.cc",
+        "src/keymaster-provision-tests.cc",
         "src/nugget_core_tests.cc",
         "src/runtests.cc",
         "src/weaver_tests.cc",
