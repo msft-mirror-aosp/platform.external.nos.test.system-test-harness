@@ -94,6 +94,7 @@ void ImportKeyTest::SetUpTestCase() {
 
   // Do setup that is normally done by the bootloader.
   keymaster_tools::SetRootOfTrust(client.get());
+  keymaster_tools::SetBootState(client.get());
 }
 
 void ImportKeyTest::TearDownTestCase() {
