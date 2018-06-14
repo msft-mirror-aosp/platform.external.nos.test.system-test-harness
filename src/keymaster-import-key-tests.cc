@@ -142,7 +142,7 @@ TEST_F(ImportKeyTest, RSAInvalidPublicExponentFails) {
   ImportKeyResponse response;
 
   // Unsupported exponent
-  initRSARequest(&request, Algorithm::RSA, 512, 2, 2,
+  initRSARequest(&request, Algorithm::RSA, 1024, 2, 2,
                  string(64, '\0'), string(64, '\0'));
 
   ASSERT_NO_ERROR(service->ImportKey(request, &response), "");
@@ -155,7 +155,7 @@ TEST_F(ImportKeyTest, RSAKeySizeTagMisatchNFails) {
   ImportKeyResponse response;
 
   // N does not match KEY_SIZE.
-  initRSARequest(&request, Algorithm::RSA, 512, 3, 3,
+  initRSARequest(&request, Algorithm::RSA, 1024, 3, 3,
                  string(64, '\0'), string(63, '\0'));
   ASSERT_NO_ERROR(service->ImportKey(request, &response), "");
   EXPECT_EQ((ErrorCode)response.error_code(),
@@ -167,7 +167,7 @@ TEST_F(ImportKeyTest, RSAKeySizeTagMisatchDFails) {
   ImportKeyResponse response;
 
   // D does not match KEY_SIZE.
-  initRSARequest(&request, Algorithm::RSA, 512, 3, 3,
+  initRSARequest(&request, Algorithm::RSA, 1024, 3, 3,
                  string(63, '\0'), string(64, '\0'));
   ASSERT_NO_ERROR(service->ImportKey(request, &response), "");
   EXPECT_EQ((ErrorCode)response.error_code(),
@@ -179,7 +179,7 @@ TEST_F(ImportKeyTest, RSAPublicExponentTagMisatchFails) {
   ImportKeyResponse response;
 
   // e does not match PUBLIC_EXPONENT tag.
-  initRSARequest(&request, Algorithm::RSA, 512, 3, 2,
+  initRSARequest(&request, Algorithm::RSA, 1024, 3, 2,
                  string(64, '\0'), string(64, '\0'));
   ASSERT_NO_ERROR(service->ImportKey(request, &response), "");
   EXPECT_EQ((ErrorCode)response.error_code(),
