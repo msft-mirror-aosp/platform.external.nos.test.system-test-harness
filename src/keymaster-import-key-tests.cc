@@ -8,7 +8,6 @@
 #include "Keymaster.client.h"
 #include "util.h"
 
-#include "src/blob.h"
 #include "src/macros.h"
 #include "src/test-data/test-keys/rsa.h"
 
@@ -247,14 +246,7 @@ TEST_F(ImportKeyTest, RSASuccess) {
     EXPECT_EQ((ErrorCode)response.error_code(), ErrorCode::OK)
         << "Failed at TEST_RSA_KEYS[" << i << "]";
 
-    /* TODO: add separate tests for blobs! */
-    EXPECT_EQ(sizeof(struct km_blob), response.blob().blob().size());
-    const struct km_blob *blob =
-        (const struct km_blob *)response.blob().blob().data();
-    EXPECT_EQ(memcmp(blob->b.key.rsa.N_bytes, TEST_RSA_KEYS[i].n,
-                     TEST_RSA_KEYS[i].size), 0);
-    EXPECT_EQ(memcmp(blob->b.key.rsa.d_bytes,
-                     TEST_RSA_KEYS[i].d, TEST_RSA_KEYS[i].size), 0);
+    /* TODO: do something useful with the imported key */
   }
 }
 
@@ -269,13 +261,7 @@ TEST_F(ImportKeyTest, RSA1024OptionalParamsAbsentSuccess) {
   ASSERT_NO_ERROR(service->ImportKey(request, &response), "");
   EXPECT_EQ((ErrorCode)response.error_code(), ErrorCode::OK);
 
-  EXPECT_EQ(sizeof(struct km_blob), response.blob().blob().size());
-  const struct km_blob *blob =
-      (const struct km_blob *)response.blob().blob().data();
-  EXPECT_EQ(memcmp(blob->b.key.rsa.N_bytes, RSA_1024_N,
-                   sizeof(RSA_1024_N)), 0);
-  EXPECT_EQ(memcmp(blob->b.key.rsa.d_bytes,
-                   RSA_1024_D, sizeof(RSA_1024_D)), 0);
+    /* TODO: do something useful with the imported key */
 }
 
 // EC
