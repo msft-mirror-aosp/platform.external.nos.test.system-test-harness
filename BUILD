@@ -9,6 +9,7 @@ cc_binary(
     name = "runtests",
     srcs = [
         "src/aes-cmac-tests.cc",
+        "src/faceauth_tests.cc",
         "src/gtest_with_gflags_main.cc",
         "src/keymaster-import-key-tests.cc",
         "src/keymaster-import-wrapped-key-tests.cc",
@@ -29,6 +30,7 @@ cc_binary(
         "@com_github_gflags_gflags//:gflags",
         "@gtest//:gtest",
         "@nugget_core_nugget//:config_chip",
+        "@nugget_core_nugget//:faceauth_common",
         "@nugget_host_generic_libnos//:libnos",
         "@nugget_host_generic_nugget_proto//:keymaster_client_proto",
         "@nugget_host_generic_nugget_proto//:nugget_app_keymaster_keymaster_cc_proto",
