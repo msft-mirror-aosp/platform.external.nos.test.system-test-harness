@@ -189,13 +189,20 @@ TEST_F(FaceAuthTest, LockoutTest) {
       MakeResult(session_id, FACEAUTH_ERR_THROTTLE, FACEAUTH_NOMATCH));
 }
 
-TEST_F(FaceAuthTest, InvalidUserTest) {
+TEST_F(FaceAuthTest, ValidProfileIDTest) {
   uint64_t session_id = 0xFACE000055550000ull;
   session_id++;
   Run(MakeTask(session_id, 0x0, FACEAUTH_CMD_ENROLL, 0x0),
       MakeResult(session_id, FACEAUTH_ERR_INVALID_ARGS, FACEAUTH_NOMATCH));
+
+  for (int i = 1; i <= MAX_NUM_PROFILES; ++i) {
+    session_id++;
+    Run(MakeTask(session_id, i, FACEAUTH_CMD_ENROLL, 0x0),
+        MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_NOMATCH));
+  }
+
   session_id++;
-  Run(MakeTask(session_id, 0x4, FACEAUTH_CMD_ENROLL, 0x0),
+  Run(MakeTask(session_id, MAX_NUM_PROFILES + 1, FACEAUTH_CMD_ENROLL, 0x0),
       MakeResult(session_id, FACEAUTH_ERR_INVALID_ARGS, FACEAUTH_NOMATCH));
 }
 
