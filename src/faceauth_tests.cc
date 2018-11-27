@@ -48,14 +48,14 @@ void FaceAuthTest::TearDownTestCase() {
   uart_printer = nullptr;
 }
 
-static fa_task_t MakeTask(uint64_t session_id, uint32_t user_id,
+static fa_task_t MakeTask(uint64_t session_id, uint32_t profile_id,
                           uint32_t cmd, uint32_t base)
 {
   fa_task_t task;
   memset(&task, base, sizeof(fa_task_t));
   task.version = 1;
   task.session_id = session_id;
-  task.user_id = user_id;
+  task.profile_id = profile_id;
   task.cmd = cmd;
   task.face.version = 1;
   task.face.valid = 0;
@@ -110,8 +110,8 @@ void FaceAuthTest::Run(const fa_task_t task, const fa_result_t expected)
 }
 
 void FaceAuthTest::SetUp() {
-  for (int users = 1; users <= MAX_NUM_USERS; ++users) {
-    Run(MakeTask(0x0, users, FACEAUTH_CMD_ERASE, 0x00),
+  for (int profiles = 1; profiles <= MAX_NUM_PROFILES; ++profiles) {
+    Run(MakeTask(0x0, profiles, FACEAUTH_CMD_ERASE, 0x00),
         MakeResult(0x0, FACEAUTH_SUCCESS, FACEAUTH_NOMATCH));
   }
 }
