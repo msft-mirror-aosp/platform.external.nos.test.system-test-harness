@@ -48,17 +48,40 @@ void FaceAuthTest::TearDownTestCase() {
   uart_printer = nullptr;
 }
 
+uint8_t CalcCrc8(const uint8_t *data, int len)
+{
+  unsigned crc = 0;
+  int i, j;
+
+  for (j = len; j; j--, data++) {
+    crc ^= (*data << 8);
+    for (i = 8; i; i--) {
+      if (crc & 0x8000) {
+        crc ^= (0x1070 << 3);
+      }
+      crc <<= 1;
+    }
+  }
+
+  return (uint8_t)(crc >> 8);
+}
+
 static fa_task_t MakeTask(uint64_t session_id, uint32_t profile_id,
                           uint32_t cmd, uint32_t base)
 {
   fa_task_t task;
   memset(&task, base, sizeof(fa_task_t));
-  task.version = 1;
-  task.session_id = session_id;
-  task.profile_id = profile_id;
-  task.cmd = cmd;
+  task.header.version = 1;
+  task.header.session_id = session_id;
+  task.header.profile_id = profile_id;
+  task.header.cmd = cmd;
+  task.header.crc = CalcCrc8(reinterpret_cast<const uint8_t*>(&task.header),
+                             offsetof(struct fa_task_header_t, crc));
   task.face.version = 1;
   task.face.valid = 0;
+  task.face.crc = CalcCrc8(reinterpret_cast<const uint8_t*>(&task.face),
+                           offsetof(struct fa_embedding_t, crc));
+
   return task;
 }
 
@@ -71,6 +94,8 @@ static fa_result_t MakeResult(uint64_t session_id, int32_t error,
   result.error = error;
   result.match = match;
   result.complete = 1;
+  result.crc = CalcCrc8(reinterpret_cast<const uint8_t*>(&result),
+                        offsetof(struct fa_result_t, crc));
   return result;
 }
 
