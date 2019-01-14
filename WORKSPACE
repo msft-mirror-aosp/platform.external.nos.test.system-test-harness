@@ -12,16 +12,16 @@ http_archive(
 
 http_archive(
     name = "com_google_protobuf",
-    url = "https://github.com/google/protobuf/archive/v3.5.0.zip",
-    strip_prefix = "protobuf-3.5.0",
-    sha256 = "cef7f1b5a7c5fba672bec2a319246e8feba471f04dcebfe362d55930ee7c1c30",
+    url = "https://github.com/google/protobuf/archive/v3.6.1.2.zip",
+    strip_prefix = "protobuf-3.6.1.2",
+    sha256 = "d6618d117698132dadf0f830b762315807dc424ba36ab9183f1f436008a2fdb6",
 )
 
 http_archive(
     name = "com_google_protobuf_cc",
-    url = "https://github.com/google/protobuf/archive/v3.5.0.zip",
-    strip_prefix = "protobuf-3.5.0",
-    sha256 = "cef7f1b5a7c5fba672bec2a319246e8feba471f04dcebfe362d55930ee7c1c30",
+    url = "https://github.com/google/protobuf/archive/v3.6.1.2.zip",
+    strip_prefix = "protobuf-3.6.1.2",
+    sha256 = "d6618d117698132dadf0f830b762315807dc424ba36ab9183f1f436008a2fdb6",
 )
 
 http_archive(
