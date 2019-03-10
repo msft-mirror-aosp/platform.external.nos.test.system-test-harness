@@ -28,6 +28,8 @@ class FaceAuthTest: public testing::Test {
 
   static void Run(const fa_task_t task, const fa_result_t expected);
 
+  static void FullMatchMismatchTest(uint32_t profile1, uint32_t profile2,
+                                    uint32_t slot1, uint32_t slot2);
 };
 
 unique_ptr<nos::NuggetClientInterface> FaceAuthTest::client;
@@ -160,32 +162,48 @@ TEST_F(FaceAuthTest, SimpleMatchMismatchTest) {
       MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_NOMATCH));
 }
 
-TEST_F(FaceAuthTest, FullMatchMismatchTest) {
+void FaceAuthTest::FullMatchMismatchTest(uint32_t profile1, uint32_t profile2,
+                                         uint32_t slot1, uint32_t slot2) {
   uint64_t session_id = 0xFACE000022220000ull;
-  for (int i = 0; i < 20; ++i) {
+  for (uint32_t i = 0; i < 20; ++i) {
     session_id++;
-    Run(MakeTask(session_id, 0x1, FACEAUTH_CMD_ENROLL, (i == 17) ? 0x11 : 0x0),
+    Run(MakeTask(session_id, profile1, FACEAUTH_CMD_ENROLL,
+                (i == slot1) ? 0x11 : 0x0),
+        MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_NOMATCH));
+    session_id++;
+    Run(MakeTask(session_id, profile2, FACEAUTH_CMD_ENROLL,
+                (i == slot2) ? 0xAA : 0x0),
         MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_NOMATCH));
   }
 
-  for (int i = 0; i < 20; ++i) {
-    session_id++;
-    Run(MakeTask(session_id, 0x2, FACEAUTH_CMD_ENROLL, (i == 11) ? 0xAA : 0x0),
-        MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_NOMATCH));
-  }
+  session_id++;
+  Run(MakeTask(session_id, profile1, FACEAUTH_CMD_COMP, 0x11),
+      MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_MATCH));
+  session_id++;
+  Run(MakeTask(session_id, profile1, FACEAUTH_CMD_COMP, 0xAA),
+      MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_NOMATCH));
+  session_id++;
+  Run(MakeTask(session_id, profile2, FACEAUTH_CMD_COMP, 0x11),
+      MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_NOMATCH));
+  session_id++;
+  Run(MakeTask(session_id, profile2, FACEAUTH_CMD_COMP, 0xAA),
+      MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_MATCH));
+}
 
-  session_id++;
-  Run(MakeTask(session_id, 0x1, FACEAUTH_CMD_COMP, 0x11),
-      MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_MATCH));
-  session_id++;
-  Run(MakeTask(session_id, 0x1, FACEAUTH_CMD_COMP, 0xAA),
-      MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_NOMATCH));
-  session_id++;
-  Run(MakeTask(session_id, 0x2, FACEAUTH_CMD_COMP, 0x11),
-      MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_NOMATCH));
-  session_id++;
-  Run(MakeTask(session_id, 0x2, FACEAUTH_CMD_COMP, 0xAA),
-      MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_MATCH));
+TEST_F(FaceAuthTest, ExhaustiveMatchMismatchTest) {
+  FullMatchMismatchTest(1, 6,  0, 19);
+  FullMatchMismatchTest(2, 5,  1, 18);
+  FullMatchMismatchTest(3, 4,  2, 17);
+  SetUp();
+  FullMatchMismatchTest(2, 4,  3, 16);
+  FullMatchMismatchTest(1, 5,  4, 15);
+  FullMatchMismatchTest(3, 6,  5, 14);
+  SetUp();
+  FullMatchMismatchTest(3, 5,  6, 13);
+  FullMatchMismatchTest(1, 4,  7, 12);
+  FullMatchMismatchTest(2, 6,  8, 11);
+  SetUp();
+  FullMatchMismatchTest(3, 6,  9, 10);
 }
 
 TEST_F(FaceAuthTest, SFSFullTest) {
