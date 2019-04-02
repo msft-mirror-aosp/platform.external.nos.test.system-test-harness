@@ -78,13 +78,15 @@ uint8_t CalcCrc8(const uint8_t *data, int len)
 }
 
 static fa_task_t MakeTask(uint64_t session_id, uint32_t profile_id,
-                          uint32_t cmd, uint32_t input_data = 0) {
+                          uint32_t cmd, uint32_t input_data1 = 0,
+                          uint32_t input_data2 = 0) {
   fa_task_t task;
   task.version = 1;
   task.session_id = session_id;
   task.profile_id = profile_id;
   task.cmd = cmd;
-  task.input_data = input_data;
+  task.input.data.first = input_data1;
+  task.input.data.second = input_data2;
   task.crc = CalcCrc8(reinterpret_cast<const uint8_t*>(&task),
                       offsetof(struct fa_task_t, crc));
   return task;
@@ -109,8 +111,8 @@ static fa_result_t MakeResult(uint64_t session_id, int32_t error,
   result.version = 1;
   result.session_id = session_id;
   result.error = error;
-  result.output_data1 = output_data1;
-  result.output_data2 = output_data2;
+  result.output.data.first = output_data1;
+  result.output.data.second = output_data2;
   result.lockout_event = lockout_event;
   result.complete = 1;
   result.crc = CalcCrc8(reinterpret_cast<const uint8_t*>(&result),
@@ -153,8 +155,8 @@ static void EXPECT_RESULT_EQ(const fa_result_t& r1, const fa_result_t& r2)
   EXPECT_EQ(r1.version, r2.version);
   EXPECT_EQ(r1.session_id, r2.session_id);
   EXPECT_EQ(r1.error, r2.error);
-  EXPECT_EQ(r1.output_data1, r2.output_data1);
-  EXPECT_EQ(r1.output_data2, r2.output_data2);
+  EXPECT_EQ(r1.output.data.first, r2.output.data.first);
+  EXPECT_EQ(r1.output.data.second, r2.output.data.second);
   EXPECT_EQ(r1.lockout_event, r2.lockout_event);
   EXPECT_EQ(r1.complete, r2.complete);
   EXPECT_EQ(r1.crc, r2.crc);
@@ -287,9 +289,9 @@ bool FaceAuthTest::IsProfileLocked(uint32_t profile1) {
   const fa_result_t observed =
       RunTask(MakeTask(session_id, profile1, FACEAUTH_CMD_GET_USER_INFO));
   const fa_result_t expected =
-      MakeResult(session_id, FACEAUTH_SUCCESS, 0, observed.output_data2);
+      MakeResult(session_id, FACEAUTH_SUCCESS, 0, observed.output.data.second);
   EXPECT_RESULT_EQ(expected, observed);
-  return observed.output_data2;
+  return observed.output.data.second;
 }
 
 void FaceAuthTest::UnlockProfileTest(uint32_t profile1) {
