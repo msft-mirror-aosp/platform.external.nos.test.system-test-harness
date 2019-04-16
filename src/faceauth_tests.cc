@@ -92,10 +92,10 @@ static fa_task_t MakeTask(uint64_t session_id, uint32_t profile_id,
   return task;
 }
 
-static fa_embedding_t* MakeEmbedding(uint32_t base) {
+static fa_embedding_t* MakeEmbedding(uint32_t base, uint32_t version = 1) {
   static fa_embedding_t embed;
   memset(&embed, base, sizeof(fa_embedding_t));
-  embed.version = 1;
+  embed.version = version;
   embed.valid = 0;
   embed.crc = CalcCrc8(reinterpret_cast<const uint8_t*>(&embed),
                        offsetof(struct fa_embedding_t, crc));
@@ -387,6 +387,19 @@ TEST_F(FaceAuthTest, SimpleFeatureTest) {
       index++;
     }
   }
+}
+
+TEST_F(FaceAuthTest, EmbeddingVersionTest) {
+  uint64_t session_id = 0xFACE0000BBBB0000ull;
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_ENROLL), MakeEmbedding(0x11));
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_MATCH),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_COMP), MakeEmbedding(0x11));
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_ERR_RECALIBRATE, FACEAUTH_NOMATCH),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_COMP), MakeEmbedding(0x11, 0x2));
 }
 }
 
