@@ -79,9 +79,10 @@ uint8_t CalcCrc8(const uint8_t *data, int len)
 
 static fa_task_t MakeTask(uint64_t session_id, uint32_t profile_id,
                           uint32_t cmd, uint32_t input_data1 = 0,
-                          uint32_t input_data2 = 0) {
+                          uint32_t input_data2 = 0,
+                          uint32_t version = FACEAUTH_MIN_ABH_VERSION) {
   fa_task_t task;
-  task.version = 1;
+  task.version = version;
   task.session_id = session_id;
   task.profile_id = profile_id;
   task.cmd = cmd;
@@ -400,6 +401,32 @@ TEST_F(FaceAuthTest, EmbeddingVersionTest) {
   session_id++;
   Run(MakeResult(session_id, FACEAUTH_ERR_RECALIBRATE, FACEAUTH_NOMATCH),
       MakeTask(session_id, 0x1, FACEAUTH_CMD_COMP), MakeEmbedding(0x11, 0x2));
+}
+
+TEST_F(FaceAuthTest, FirmwareVersionTest) {
+  uint64_t session_id = 0xFACE0000CCCC0000ull;
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_ENROLL), MakeEmbedding(0x11));
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_ERR_VERSION, FACEAUTH_NOMATCH),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_COMP, 0, 0, 0x1),
+      MakeEmbedding(0x11));
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_ERR_VERSION, FACEAUTH_NOMATCH),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_COMP, 0, 0,
+               FACEAUTH_MIN_ABH_VERSION - 0x100),
+      MakeEmbedding(0x11));
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_MATCH),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_COMP, 0, 0,
+               FACEAUTH_MIN_ABH_VERSION),
+      MakeEmbedding(0x11));
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_MATCH),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_COMP, 0, 0,
+               FACEAUTH_MIN_ABH_VERSION + 0x100),
+      MakeEmbedding(0x11));
 }
 }
 
