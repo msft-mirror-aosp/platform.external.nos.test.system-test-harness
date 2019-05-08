@@ -19,7 +19,7 @@ function oem_lock_vts_tests() {
 }
 
 function keymaster_cts_tests() {
-    return 0
+    atest CtsKeystoreTestCases || return 1
 }
 
 function keymaster_vts_tests() {
