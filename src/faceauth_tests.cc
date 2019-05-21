@@ -51,9 +51,6 @@ unique_ptr<test_harness::TestHarness> FaceAuthTest::uart_printer;
 
 void FaceAuthTest::SetUpTestCase() {
   srand(time(NULL));
-  for (int i = 0; i <= MAX_NUM_PROFILES; ++i) {
-    user_ids.push_back(rand());
-  }
   uart_printer = test_harness::TestHarness::MakeUnique();
 
   client = nugget_tools::MakeNuggetClient();
@@ -148,11 +145,11 @@ vector<uint8_t> Task2Buffer(const fa_task_t task, const fa_embedding_t* embed,
     else
       buffer.push_back(0);
   }
-  for (size_t i = 0; i < sizeof(fa_token_t); ++i) {
-    if (token)
+
+  if (token) {
+    for (size_t i = 0; i < sizeof(fa_token_t); ++i) {
       buffer.push_back(*(reinterpret_cast<const uint8_t*>(token) + i));
-    else
-      buffer.push_back(0);
+    }
   }
 
   return buffer;
@@ -181,7 +178,7 @@ const fa_result_t FaceAuthTest::RunTask(const fa_task_t task,
                                         const fa_embedding_t* embed,
                                         const fa_token_t* token) {
   vector<uint8_t> buffer_rx;
-  buffer_rx.resize(1024);
+  buffer_rx.resize(512);
 
   vector<uint8_t> buffer_tx = Task2Buffer(task, embed, token);
   FaceAuthTest::client->CallApp(APP_ID_FACEAUTH_TEST, 1, buffer_tx, &buffer_rx);
@@ -195,6 +192,19 @@ void FaceAuthTest::Run(const fa_result_t expected, const fa_task_t task,
 }
 
 void FaceAuthTest::SetUp() {
+  user_ids.clear();
+  for (int i = 0; i <= MAX_NUM_PROFILES; ++i) {
+    user_ids.push_back(rand());
+  }
+
+  fa_task_t task;
+  fa_embedding_t embed;
+  fa_token_t token;
+  memset(&task, 0, sizeof(task));
+  memset(&embed, 0, sizeof(embed));
+  memset(&token, 0, sizeof(token));
+  RunTask(task, &embed, &token);
+
   for (int profiles = 1; profiles <= MAX_NUM_PROFILES; ++profiles) {
     Run(MakeResult(0x0, FACEAUTH_SUCCESS),
         MakeTask(0x0, profiles, FACEAUTH_CMD_ERASE));
@@ -324,29 +334,21 @@ TEST_F(FaceAuthTest, ExhaustiveLockoutTest) {
   EXPECT_EQ(IsProfileLocked(6), false);
 }
 
-TEST_F(FaceAuthTest, ValidProfileUserIDTest) {
-  fa_token_t token;
+TEST_F(FaceAuthTest, ValidProfileIDTest) {
   uint64_t session_id = 0xFACE000088880000ull;
   session_id++;
-  token = MakeToken(1);
-  Run(MakeResult(session_id, FACEAUTH_SUCCESS, 0, 0, 1),
-      MakeTask(session_id, 0, FACEAUTH_CMD_ENROLL), MakeEmbedding(0x0), &token);
+  Run(MakeResult(session_id, FACEAUTH_ERR_INVALID_ARGS),
+      MakeTask(session_id, 0, FACEAUTH_CMD_ENROLL), MakeEmbedding(0x0));
 
-  for (int i = 1; i <= 6; ++i) {
+  for (int i = 1; i <= MAX_NUM_PROFILES; ++i) {
     session_id++;
-    token = MakeToken(i);
     Run(MakeResult(session_id, FACEAUTH_SUCCESS, 0, 0, i),
-        MakeTask(session_id, (i % 2) ? i : 0, FACEAUTH_CMD_ENROLL),
-        MakeEmbedding(0x0), &token);
+        MakeTask(session_id, i, FACEAUTH_CMD_ENROLL), MakeEmbedding(0x0));
   }
 
   session_id++;
-  token = MakeToken(2);
-  Run(MakeResult(session_id, FACEAUTH_ERR_INVALID_TOKEN),
-      MakeTask(session_id, 3, FACEAUTH_CMD_ENROLL), MakeEmbedding(0x0), &token);
-  session_id++;
-  Run(MakeResult(session_id, FACEAUTH_ERR_SFS_FULL),
-      MakeTask(session_id, 0, FACEAUTH_CMD_ENROLL));
+  Run(MakeResult(session_id, FACEAUTH_ERR_INVALID_ARGS),
+      MakeTask(session_id, MAX_NUM_PROFILES + 1, FACEAUTH_CMD_ENROLL));
 }
 
 TEST_F(FaceAuthTest, InvalidCommandTest) {
@@ -433,6 +435,136 @@ TEST_F(FaceAuthTest, FirmwareVersionTest) {
       MakeTask(session_id, 0x1, FACEAUTH_CMD_COMP, 0, 0,
                FACEAUTH_MIN_ABH_VERSION + 0x100),
       MakeEmbedding(0x11));
+}
+
+TEST_F(FaceAuthTest, GetProfileInfoTest) {
+  uint64_t session_id = 0xFACE0000CCCC0000ull;
+  user_ids[1] = user_ids[4];
+  user_ids[2] = user_ids[4];
+
+  for (int i = 1; i <= MAX_NUM_PROFILES; ++i) {
+    session_id++;
+    fa_token_t token = MakeToken(i);
+    Run(MakeResult(session_id, FACEAUTH_SUCCESS, 0, 0, i),
+        MakeTask(session_id, i, FACEAUTH_CMD_ENROLL), MakeEmbedding(0x11),
+        &token);
+  }
+
+  union {
+    uint8_t map[8];
+    struct {
+      uint32_t first;
+      uint32_t second;
+    };
+  } expected = {0};
+
+  for (int i = 0; i < MAX_NUM_PROFILES; ++i) {
+    for (int j = 0; j < MAX_NUM_PROFILES; ++j) {
+      expected.map[i] |= ((user_ids[i + 1] == user_ids[j + 1]) << j);
+    }
+  }
+
+  for (int i = 1; i <= MAX_NUM_PROFILES; ++i) {
+    session_id++;
+    fa_token_t token = MakeToken(i);
+    expected.map[MAX_NUM_PROFILES] = expected.map[i - 1];
+    Run(MakeResult(session_id, FACEAUTH_SUCCESS, expected.first,
+                   expected.second),
+        MakeTask(session_id, 1, FACEAUTH_CMD_GET_PROFILE_INFO),
+        MakeEmbedding(0x11), &token);
+  }
+
+  for (int i = 1; i <= MAX_NUM_PROFILES; ++i) {
+    session_id++;
+    Run(MakeResult(session_id, FACEAUTH_SUCCESS, 0, 0, expected.map[i - 1]),
+        MakeTask(session_id, i, FACEAUTH_CMD_GET_USER_INFO),
+        MakeEmbedding(0x11));
+  }
+}
+
+TEST_F(FaceAuthTest, EnrollShouldOnlyAcceptSameUser) {
+  uint64_t session_id = 0xFACE0000DDDD0000ull;
+  session_id++;
+
+  session_id++;
+  fa_token_t token = MakeToken(1);
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, 0, 0, 0x1),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_ENROLL), MakeEmbedding(0x11),
+      &token);
+  session_id++;
+  token = MakeToken(2);
+  Run(MakeResult(session_id, FACEAUTH_ERR_INVALID_TOKEN),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_ENROLL), MakeEmbedding(0x11),
+      &token);
+  session_id++;
+  token = MakeToken(1);
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, 0, 0, 0x1),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_ENROLL), MakeEmbedding(0x11),
+      &token);
+}
+
+TEST_F(FaceAuthTest, MigrateShouldOnlyAcceptSameUser) {
+  uint64_t session_id = 0xFACE0000DDDD0000ull;
+  session_id++;
+
+  session_id++;
+  fa_token_t token = MakeToken(1);
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, 0x1),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_MIGRATE), MakeEmbedding(0x11),
+      &token);
+  session_id++;
+  token = MakeToken(2);
+  Run(MakeResult(session_id, FACEAUTH_ERR_INVALID_TOKEN),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_MIGRATE), MakeEmbedding(0x11),
+      &token);
+  session_id++;
+  token = MakeToken(1);
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, 0x1),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_MIGRATE), MakeEmbedding(0x11),
+      &token);
+}
+
+TEST_F(FaceAuthTest, SimpleAuthenticateMigrateFlow) {
+  uint64_t session_id = 0xFACE0000EEEE0000ull;
+  session_id++;
+
+  session_id++;
+  fa_token_t token = MakeToken(1);
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, 0, 0, 0x1),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_ENROLL), MakeEmbedding(0x11),
+      &token);
+  session_id++;
+  token = MakeToken(2);
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, 0, 0, 0x2),
+      MakeTask(session_id, 0x2, FACEAUTH_CMD_ENROLL), MakeEmbedding(0x11),
+      &token);
+
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_MATCH),
+      MakeTask(session_id, 0x1, FACEAUTH_CMD_COMP), MakeEmbedding(0x11));
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, 3, 0, FACEAUTH_NOMATCH),
+      MakeTask(session_id, 0x3, FACEAUTH_CMD_MIGRATE), MakeEmbedding(0x11));
+
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_MATCH),
+      MakeTask(session_id, 0x2, FACEAUTH_CMD_COMP), MakeEmbedding(0x11));
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_ERR_INVALID_TOKEN),
+      MakeTask(session_id, 0x3, FACEAUTH_CMD_MIGRATE), MakeEmbedding(0x11));
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, 4, 1, FACEAUTH_MATCH),
+      MakeTask(session_id, 0x4, FACEAUTH_CMD_MIGRATE, 1), MakeEmbedding(0x11));
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, 4, 2, FACEAUTH_MATCH),
+      MakeTask(session_id, 0x4, FACEAUTH_CMD_MIGRATE, 1), MakeEmbedding(0x11));
+
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_NOMATCH),
+      MakeTask(session_id, 0x3, FACEAUTH_CMD_COMP), MakeEmbedding(0x11));
+  session_id++;
+  Run(MakeResult(session_id, FACEAUTH_SUCCESS, FACEAUTH_MATCH),
+      MakeTask(session_id, 0x4, FACEAUTH_CMD_COMP), MakeEmbedding(0x11));
 }
 
 TEST_F(FaceAuthTest, ExhaustiveMatchMismatchTest) {
