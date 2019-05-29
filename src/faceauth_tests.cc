@@ -51,7 +51,7 @@ unique_ptr<test_harness::TestHarness> FaceAuthTest::uart_printer;
 
 void FaceAuthTest::SetUpTestCase() {
   srand(time(NULL));
-  for (int i = 0; i < MAX_NUM_PROFILES; ++i) {
+  for (int i = 0; i <= MAX_NUM_PROFILES; ++i) {
     user_ids.push_back(rand());
   }
   uart_printer = test_harness::TestHarness::MakeUnique();
