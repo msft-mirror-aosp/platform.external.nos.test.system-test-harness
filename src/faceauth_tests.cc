@@ -16,7 +16,7 @@ using std::unique_ptr;
 
 namespace {
 
-const vector<uint8_t> EMBEDDING_VECTOR_NULL(1, 128);
+vector<uint8_t> EMBEDDING_VECTOR_NULL(128, 0);
 const vector<uint8_t> EMBEDDING_VECTOR_1(64, 16);
 const vector<uint8_t> EMBEDDING_VECTOR_2(64, (uint8_t)-16);
 
@@ -50,6 +50,9 @@ void FaceAuthTest::SetUpTestCase() {
   client = nugget_tools::MakeNuggetClient();
   client->Open();
   EXPECT_TRUE(client->IsOpen()) << "Unable to connect";
+
+  /* We need any embedding vector to have magnitude of 128 */
+  EMBEDDING_VECTOR_NULL[127] = 128;
   DisengageGlobalLockout();
 }
 
