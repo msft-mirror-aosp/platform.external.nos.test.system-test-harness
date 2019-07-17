@@ -94,9 +94,10 @@ TEST_F(NuggetCoreTest, GetLowPowerStats) {
   ASSERT_NO_ERROR(NuggetCoreTest::client->CallApp(
       APP_ID_NUGGET, NUGGET_PARAM_GET_LOW_POWER_STATS,
       buffer, &buffer), "");
-  ASSERT_GE(buffer.size(), sizeof(stats));
+  ASSERT_GE(buffer.size(), sizeof(uint64_t) * 8);  // was 8, now 10, both okay
 
-  memcpy(&stats, buffer.data(), sizeof(stats));
+  memset(&stats, 0, sizeof(stats));
+  memcpy(&stats, buffer.data(), std::min(sizeof(stats), buffer.size()));
 
   /* We must have booted once and been awake long enough to reply, but that's
    * about all we can be certain of. */
