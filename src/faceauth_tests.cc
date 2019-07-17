@@ -16,18 +16,19 @@ using std::unique_ptr;
 
 namespace {
 
-const uint8_t EMBEDDING_VECTOR_NULL = 0x0;
-const uint8_t EMBEDDING_VECTOR_1 = 0x11;
-const uint8_t EMBEDDING_VECTOR_2 = 0xAA;
+vector<uint8_t> EMBEDDING_VECTOR_NULL(128, 0);
+const vector<uint8_t> EMBEDDING_VECTOR_1(64, 16);
+const vector<uint8_t> EMBEDDING_VECTOR_2(64, (uint8_t)-16);
+
+const uint32_t PROFILE_1 = 1;
+const uint32_t PROFILE_2 = 2;
+const uint32_t PROFILE_3 = 3;
+const uint32_t PROFILE_4 = 4;
+const uint32_t PROFILE_5 = 5;
+const uint32_t PROFILE_6 = 6;
 
 class FaceAuthTest: public testing::Test {
  public:
-  const uint32_t PROFILE_1 = 1;
-  const uint32_t PROFILE_2 = 2;
-  const uint32_t PROFILE_3 = 3;
-  const uint32_t PROFILE_4 = 4;
-  const uint32_t PROFILE_5 = 5;
-  const uint32_t PROFILE_6 = 6;
   static unique_ptr<nos::NuggetClientInterface> client;
   static unique_ptr<test_harness::TestHarness> uart_printer;
 
@@ -36,6 +37,7 @@ class FaceAuthTest: public testing::Test {
 
   static void SetUpTestCase();
   static void TearDownTestCase();
+  static void DisengageGlobalLockout();
 };
 
 unique_ptr<nos::NuggetClientInterface> FaceAuthTest::client;
@@ -48,6 +50,10 @@ void FaceAuthTest::SetUpTestCase() {
   client = nugget_tools::MakeNuggetClient();
   client->Open();
   EXPECT_TRUE(client->IsOpen()) << "Unable to connect";
+
+  /* We need any embedding vector to have magnitude of 128 */
+  EMBEDDING_VECTOR_NULL[127] = 128;
+  DisengageGlobalLockout();
 }
 
 void FaceAuthTest::TearDownTestCase() {
@@ -117,10 +123,12 @@ class Task {
 class Embedding {
  public:
   Embedding() { memset(&embed, 0, sizeof(embed)); }
-  Embedding(uint8_t base, uint32_t version = 1) {
-    memset(&embed, base, sizeof(embed));
+  Embedding(vector<uint8_t> base, uint32_t version = 1) {
+    memset(&embed, 0, sizeof(embed));
     embed.version = version;
     embed.valid = 0;
+    std::copy(base.begin(), base.end(), &embed.face_id[0]);
+    std::copy(base.begin(), base.end(), &embed.depth_id[0]);
   }
 
   void Finalize() {
@@ -395,6 +403,19 @@ void FaceAuthTest::SetUp() {
     EXPECT_REQ(Device::Erase(i + 1), Result(FACEAUTH_SUCCESS));
 }
 
+void FaceAuthTest::DisengageGlobalLockout() {
+  /* Send Auth Token */
+  Result generate_result = Device::GenerateChallenge();
+  EXPECT_REQ(generate_result,
+             Result(FACEAUTH_SUCCESS).SetChallenge(Device::GetChallenge()));
+  EXPECT_REQ(Transaction(Task(PROFILE_1, FACEAUTH_CMD_ENROLL).Finalize(),
+                         Embedding(EMBEDDING_VECTOR_1, 1),
+                         Token(Device::GetChallenge(), 0, 0))
+                 .Run()
+                 .GetResult(),
+             Result(FACEAUTH_ERR_CRC));
+}
+
 TEST_F(FaceAuthTest, OldFirmwareVersionShouldError) {
   EXPECT_REQ(Transaction(Task(PROFILE_1, FACEAUTH_CMD_ERASE,
                               FACEAUTH_MIN_ABH_VERSION - 0x100),
@@ -541,7 +562,7 @@ TEST_F(FaceAuthTest, ValidProfileIDTest) {
 
 class User {
  public:
-  User(uint8_t embed_base) : embed_base(embed_base) {
+  User(vector<uint8_t> embed_base) : embed_base(embed_base) {
     user_id = rand();
     user_id <<= 32;
     user_id += rand();
@@ -552,7 +573,7 @@ class User {
     return *this;
   }
 
-  User& SetEmbeddingBase(uint8_t base) {
+  User& SetEmbeddingBase(vector<uint8_t> base) {
     embed_base = base;
     return *this;
   }
@@ -643,7 +664,7 @@ class User {
   }
 
   void LockProfile(uint32_t profile_id) {
-    uint8_t original_embed_base = embed_base;
+    vector<uint8_t> original_embed_base = embed_base;
     embed_base = EMBEDDING_VECTOR_NULL;
     /* Fail Authentication 4 times */
     for (int i = 0; i < 4; ++i) {
@@ -708,7 +729,7 @@ class User {
   uint64_t operation_id;
   uint64_t auth_id = 0;
   uint64_t user_id;
-  uint8_t embed_base;
+  vector<uint8_t> embed_base;
   uint8_t embed_version;
 };
 
@@ -1048,7 +1069,7 @@ TEST_F(FaceAuthTest, ExhaustiveLockoutTest) {
   vector<User> users;
 
   for (int i = 0; i < MAX_NUM_PROFILES; ++i) {
-    users.push_back(User(EMBEDDING_VECTOR_NULL).SetEmbeddingVersion(1));
+    users.push_back(User(EMBEDDING_VECTOR_1).SetEmbeddingVersion(1));
     Result enroll_result = users[i].Enroll(i + 1);
     EXPECT_REQ(enroll_result,
                Result(FACEAUTH_SUCCESS).SetChallenge(users[i].GetAuthID()));
