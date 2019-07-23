@@ -1138,8 +1138,7 @@ TEST_F(FaceAuthTest, ExhaustiveFeatureTest) {
   }
 }
 
-static void FullMatchMismatchTest(uint32_t profile_1, uint32_t profile_2,
-                                  uint32_t slot_1, uint32_t slot_2) {
+static void FullMatchMismatchTest(uint32_t profile_1, uint32_t profile_2) {
   User user1(EMBEDDING_VECTOR_1);
   user1.SetEmbeddingVersion(1);
 
@@ -1148,17 +1147,11 @@ static void FullMatchMismatchTest(uint32_t profile_1, uint32_t profile_2,
 
   for (uint32_t i = 0; i < 20; ++i) {
     Result result;
-    if (i == slot_1)
-      result = user1.SetEmbeddingBase(EMBEDDING_VECTOR_1).Enroll(profile_1);
-    else
-      result = user1.SetEmbeddingBase(EMBEDDING_VECTOR_NULL).Enroll(profile_1);
+    result = user1.SetEmbeddingBase(EMBEDDING_VECTOR_1).Enroll(profile_1);
     EXPECT_REQ(result,
                Result(FACEAUTH_SUCCESS).SetChallenge(user1.GetAuthID()));
 
-    if (i == slot_2)
-      result = user2.SetEmbeddingBase(EMBEDDING_VECTOR_2).Enroll(profile_2);
-    else
-      result = user2.SetEmbeddingBase(EMBEDDING_VECTOR_NULL).Enroll(profile_2);
+    result = user2.SetEmbeddingBase(EMBEDDING_VECTOR_2).Enroll(profile_2);
     EXPECT_REQ(result,
                Result(FACEAUTH_SUCCESS).SetChallenge(user2.GetAuthID()));
   }
@@ -1177,19 +1170,9 @@ static void FullMatchMismatchTest(uint32_t profile_1, uint32_t profile_2,
 }
 
 TEST_F(FaceAuthTest, ExhaustiveMatchMismatchTest) {
-  FullMatchMismatchTest(PROFILE_1, PROFILE_6, 0, 19);
-  FullMatchMismatchTest(PROFILE_2, PROFILE_5, 1, 18);
-  FullMatchMismatchTest(PROFILE_3, PROFILE_4, 2, 17);
-  SetUp();
-  FullMatchMismatchTest(PROFILE_2, PROFILE_4, 3, 16);
-  FullMatchMismatchTest(PROFILE_1, PROFILE_5, 4, 15);
-  FullMatchMismatchTest(PROFILE_3, PROFILE_6, 5, 14);
-  SetUp();
-  FullMatchMismatchTest(PROFILE_3, PROFILE_5, 6, 13);
-  FullMatchMismatchTest(PROFILE_1, PROFILE_4, 7, 12);
-  FullMatchMismatchTest(PROFILE_2, PROFILE_6, 8, 11);
-  SetUp();
-  FullMatchMismatchTest(PROFILE_3, PROFILE_6, 9, 10);
+  FullMatchMismatchTest(PROFILE_1, PROFILE_6);
+  FullMatchMismatchTest(PROFILE_2, PROFILE_5);
+  FullMatchMismatchTest(PROFILE_3, PROFILE_4);
 }
 }
 
