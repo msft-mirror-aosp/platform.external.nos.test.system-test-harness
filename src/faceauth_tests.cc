@@ -463,12 +463,6 @@ TEST_F(FaceAuthTest, ZeroChallengeShouldError) {
                  .Run()
                  .GetResult(),
              Result(FACEAUTH_ERR_INVALID_CHALLENGE));
-  EXPECT_REQ(Transaction(Task(PROFILE_1, FACEAUTH_CMD_RESET_LOCKOUT),
-                         Embedding(EMBEDDING_VECTOR_1, 1), Token())
-                 .Finalize()
-                 .Run()
-                 .GetResult(),
-             Result(FACEAUTH_ERR_INVALID_CHALLENGE));
 }
 
 TEST_F(FaceAuthTest, InvalidChallengeShouldError) {
@@ -489,12 +483,6 @@ TEST_F(FaceAuthTest, InvalidChallengeShouldError) {
                  .GetResult(),
              Result(FACEAUTH_ERR_INVALID_CHALLENGE));
   EXPECT_REQ(Transaction(Task(PROFILE_1, FACEAUTH_CMD_CLR_FEATURE),
-                         Embedding(EMBEDDING_VECTOR_1, 1), Token(rand(), 0, 0))
-                 .Finalize()
-                 .Run()
-                 .GetResult(),
-             Result(FACEAUTH_ERR_INVALID_CHALLENGE));
-  EXPECT_REQ(Transaction(Task(PROFILE_1, FACEAUTH_CMD_RESET_LOCKOUT),
                          Embedding(EMBEDDING_VECTOR_1, 1), Token(rand(), 0, 0))
                  .Finalize()
                  .Run()
@@ -835,11 +823,6 @@ TEST_F(FaceAuthTest, ValidUserIDCheck) {
   Result enroll_result = user1.Enroll(PROFILE_1);
   EXPECT_REQ(enroll_result,
              Result(FACEAUTH_SUCCESS).SetChallenge(user1.GetAuthID()));
-
-  /* Reset Lockout User ID Check */
-  EXPECT_REQ(user1.ResetLockout(PROFILE_1), Result(FACEAUTH_SUCCESS));
-  EXPECT_REQ(user2.ResetLockout(PROFILE_1),
-             Result(FACEAUTH_ERR_INVALID_USER_ID));
   /* Set Feature User ID Check */
   EXPECT_REQ(user1.SetFeature(PROFILE_1, 0), Result(FACEAUTH_SUCCESS));
   EXPECT_REQ(user2.SetFeature(PROFILE_1, 0),
