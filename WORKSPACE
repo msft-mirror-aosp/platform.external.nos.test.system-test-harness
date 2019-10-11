@@ -4,10 +4,9 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
     name = "gtest",
-    url = "https://github.com/google/googletest/archive/release-1.8.0.zip",
-    build_file = "@//:BUILD.gtest",
-    sha256 = "f3ed3b58511efd272eb074a3a6d6fb79d7c2e6a0e374323d1e6bcbcc1ef141bf",
-    strip_prefix = "googletest-release-1.8.0",
+    url = "https://github.com/google/googletest/archive/release-1.8.1.zip",
+    sha256 = "927827c183d01734cc5cfef85e0ff3f5a92ffe6188e0d18e909c5efebf28a0c7",
+    strip_prefix = "googletest-release-1.8.1",
 )
 
 http_archive(
